@@ -1,0 +1,75 @@
+name: Build Offline Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Accept Android SDK licenses
+        run: |
+          if [ -x "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          fi
+
+      - name: Generate offline APK signing keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore keystore.jks \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias pixellane \
+            -storepass pixellane123 \
+            -keypass pixellane123 \
+            -dname "CN=Pixel Lane MOBA, OU=Mobile, O=Offline Build, L=Web, ST=NA, C=US"
+
+      - name: Compile Signed Release & Debug APKs
+        run: gradle assembleRelease assembleDebug --stacktrace
+
+      - name: Prepare named APK files
+        run: |
+          mkdir -p dist-apk
+          cp app/build/outputs/apk/release/app-release.apk "dist-apk/pixel-lane-moba-v1.0.0-release.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist-apk/pixel-lane-moba-v1.0.0-debug.apk"
+          ls -lh dist-apk/
+
+      - name: Upload APK build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixel-lane-moba-v1.0.0-apk
+          path: dist-apk/*.apk
+          retention-days: 30
+
+      - name: Publish direct APK download to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0-build-${{ github.run_number }}
+          name: "Pixel Lane MOBA v1.0.0 (Build #${{ github.run_number }})"
+          body: |
+            Offline Android APK compiled automatically by GitHub Actions.
+            - **Direct install**: Download `pixel-lane-moba-v1.0.0-release.apk` onto your Android device and tap to install.
+            - **Package ID**: `com.pixellane.moba`
+            - **Offline Mode**: Zero network permissions required (100% offline)
+          files: |
+            dist-apk/pixel-lane-moba-v1.0.0-release.apk
+            dist-apk/pixel-lane-moba-v1.0.0-debug.apk
